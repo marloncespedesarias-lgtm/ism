@@ -19,21 +19,20 @@
         .lock-content { text-align: center; width: 80%; }
         .lock-input { width: 100%; padding: 15px; border-radius: 12px; border: 1px solid #ccc; font-size: 24px; text-align: center; margin-bottom: 15px; outline: none; }
 
-        /* CABECERA CON BOTÓN BORRAR TODO */
+        /* CABECERA SIN NOMBRE */
         .header { 
             padding: 55px 20px 15px; display: flex; justify-content: space-between; align-items: center;
             background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); border-bottom: 0.5px solid #C6C6C8; position: sticky; top: 0; z-index: 10; 
         }
-        .header-title { flex-grow: 1; text-align: center; font-weight: 600; font-size: 17px; margin-left: 30px; }
+        .header-title { flex-grow: 1; text-align: center; font-weight: 600; font-size: 17px; color: #000; }
         .btn-trash-all { color: var(--ios-red); background: none; border: none; font-size: 20px; cursor: pointer; }
 
-        #chat-box { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        #chat-box { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
 
-        /* MENSAJES */
+        /* MENSAJES SIN NOMBRE ARRIBA */
         .msg { max-width: 75%; padding: 10px 16px; border-radius: 20px; font-size: 16px; line-height: 1.4; position: relative; cursor: pointer; -webkit-tap-highlight-color: transparent; }
         .sent { align-self: flex-end; background: var(--ios-blue); color: white; border-bottom-right-radius: 4px; }
         .received { align-self: flex-start; background: var(--ios-received); color: black; border-bottom-left-radius: 4px; }
-        .msg-info { font-size: 11px; margin-bottom: 4px; display: block; color: var(--ios-gray); }
 
         .location-msg { background: #fff !important; color: #007AFF !important; border: 1px solid #D1D1D6; padding: 10px !important; min-width: 180px; font-weight: 600; text-align: center; }
         
@@ -58,15 +57,15 @@
     </div>
 
     <div class="header">
-        <div style="width:30px"></div> <div class="header-title" id="app-title">Mensajes</div>
-        <button class="btn-trash-all" onclick="borrarTodoHistorial()">🗑️</button>
+        <div style="width:30px"></div>
+        <div class="header-title">Chat Privado</div> <button class="btn-trash-all" onclick="borrarTodoHistorial()">🗑️</button>
     </div>
 
     <div id="chat-box"></div>
 
     <div id="map-overlay">
         <div class="map-nav">
-            <span id="map-target-name">Ubicación</span>
+            <span style="font-weight: bold;">Ubicación</span>
             <button onclick="closeMap()" style="color:var(--ios-blue); border:none; background:none; font-weight:600;">Listo</button>
         </div>
         <div id="full-map"></div>
@@ -101,78 +100,64 @@
             else alert("Clave incorrecta");
         };
 
-        let miNombre = localStorage.getItem("nombreUsuario") || prompt("Tu nombre:") || "Usuario";
-        localStorage.setItem("nombreUsuario", miNombre);
-        document.getElementById("app-title").textContent = miNombre;
+        // Asignamos un ID único por sesión para saber quién es "yo" sin usar nombres visibles
+        let miID = localStorage.getItem("userSessionID") || Math.random().toString(36).substring(7);
+        localStorage.setItem("userSessionID", miID);
 
-        // --- BORRAR TODO EL HISTORIAL ---
         window.borrarTodoHistorial = () => {
-            if(confirm("⚠️ ¿ESTÁS SEGURO? Esto borrará TODOS los mensajes para TODOS los usuarios.")) {
-                const pass = prompt("Introduce la clave maestra para borrar todo:");
-                if(pass === "26") {
-                    remove(chatRef).then(() => alert("Historial borrado.")).catch(e => alert("Error: " + e));
-                } else {
-                    alert("Clave incorrecta.");
-                }
+            if(confirm("¿Borrar todo el historial?")) {
+                const pass = prompt("Clave maestra:");
+                if(pass === "26") remove(chatRef);
             }
         };
 
-        // --- MAPA ---
         let leafletMap = L.map('full-map', { zoomControl: false }).setView([9.928, -84.09], 13);
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(leafletMap);
         let marker = L.marker([0,0], { icon: L.divIcon({ className: 'user-dot' }) }).addTo(leafletMap);
 
-        window.openMap = (nombre) => {
+        window.openMap = (senderID) => {
             document.getElementById('map-overlay').style.display = 'flex';
             setTimeout(() => leafletMap.invalidateSize(), 200);
-            onValue(ref(db, 'rastreo/' + nombre), (snap) => {
+            onValue(ref(db, 'rastreo/' + senderID), (snap) => {
                 const pos = snap.val();
                 if(pos) { marker.setLatLng([pos.lat, pos.lng]); leafletMap.flyTo([pos.lat, pos.lng], 16); }
             });
         };
         window.closeMap = () => document.getElementById('map-overlay').style.display = 'none';
 
-        // --- ENVIAR ---
         document.getElementById('btnEnviar').onclick = () => {
             const val = document.getElementById('mensajeTxt').value;
             if(val.trim()) {
-                push(chatRef, { nombre: miNombre, texto: val, tipo: 'texto', fecha: serverTimestamp() });
+                push(chatRef, { userID: miID, texto: val, tipo: 'texto', fecha: serverTimestamp() });
                 document.getElementById('mensajeTxt').value = "";
             }
         };
 
         document.getElementById('btnCompartir').onclick = () => {
             navigator.geolocation.getCurrentPosition((p) => {
-                set(ref(db, 'rastreo/' + miNombre), { lat: p.coords.latitude, lng: p.coords.longitude });
-                push(chatRef, { nombre: miNombre, tipo: 'ubicacion', texto: "Ubicación", fecha: serverTimestamp() });
+                set(ref(db, 'rastreo/' + miID), { lat: p.coords.latitude, lng: p.coords.longitude });
+                push(chatRef, { userID: miID, tipo: 'ubicacion', texto: "Ubicación", fecha: serverTimestamp() });
             });
         };
 
-        // --- RECIBIR ---
         onChildAdded(chatRef, (snap) => {
             const data = snap.val();
             const id = snap.key;
-            const esMio = data.nombre === miNombre;
+            const esMio = data.userID === miID;
             const div = document.createElement("div");
             div.className = `msg ${esMio ? 'sent' : 'received'}`;
             div.id = "msg-" + id;
 
-            // Al tocar el mensaje (un toque normal), si es tuyo, pregunta si borrar
             div.onclick = () => {
-                if(data.tipo === 'ubicacion') {
-                    openMap(data.nombre);
-                } else if(esMio) {
-                    if(confirm("¿Quieres eliminar este mensaje?")) {
-                        remove(ref(db, 'mensajes/' + id));
-                    }
-                }
+                if(data.tipo === 'ubicacion') openMap(data.userID);
+                else if(esMio && confirm("¿Eliminar mensaje?")) remove(ref(db, 'mensajes/' + id));
             };
 
             if (data.tipo === 'ubicacion') {
                 div.classList.add('location-msg');
-                div.innerHTML = `📍 Ubicación en Vivo`;
+                div.innerHTML = `📍 Ubicación`;
             } else {
-                div.innerHTML = `<span class="msg-info">${esMio ? '' : data.nombre}</span>${data.texto}`;
+                div.innerText = data.texto;
             }
             document.getElementById('chat-box').appendChild(div);
             document.getElementById('chat-box').scrollTop = document.getElementById('chat-box').scrollHeight;
