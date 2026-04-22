@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>iMessage</title>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/733/733585.png">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <style>
+        :root {
+            --ios-blue: #007AFF;
+            --ios-bg: #FFFFFF;
+            --ios-gray: #8E8E93;
+            --ios-received: #E9E9EB;
+        }
+
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif; 
+            background-color: var(--ios-bg); 
+            margin: 0; 
+            display: flex; 
+            flex-direction: column; 
+            height: 100vh;
+            color: #000;
+            overflow: hidden;
+        }
+
+        .header { 
+            padding: 55px 20px 15px;
+            text-align: center; 
+            font-weight: 600; 
+            font-size: 17px; 
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 0.5px solid #C6C6C8;
+            position: sticky; top: 0; z-index: 10;
+        }
+
+        #chat-box { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+
+        .msg { max-width: 70%; padding: 10px 16px; border-radius: 20px; font-size: 16px; line-height: 1.4; position: relative; }
+        .sent { align-self: flex-end; background: var(--ios-blue); color: white; border-bottom-right-radius: 4px; }
+        .received { align-self: flex-start; background: var(--ios-received); color: black; border-bottom-left-radius: 4px; }
+        .msg-info { font-size: 11px; margin-bottom: 4px; display: block; color: var(--ios-gray); font-weight: 500; }
+
+        /* Estilo para que la ubicación parezca un mapa pequeño */
+        .location-msg { cursor: pointer; border: 1px solid #ddd; background: #f0f0f0 !important; color: #007AFF !important; font-weight: 600; }
+
+        /* Pantalla del Mapa Completa */
+        #map-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: white; z-index: 1000; display: none; flex-direction: column;
+        }
+        #full-map { flex: 1; width: 100%; background: #e5e3df; /* Color de fondo mientras carga */ }
+        .map-nav { 
+            padding: 50px 20px 15px; background: #f9f9f9; 
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 0.5px solid #ccc;
+        }
+
+        .input-area { 
+            padding: 10px 15px 34px; 
+            display: flex; align-items: center; gap: 10px;
+            background: rgba(249, 249, 249, 0.94);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 0.5px solid #C6C6C8;
+        }
+
+        input { flex: 1; padding: 10px 15px; border-radius: 20px; border: 1px solid #C6C6C8; font-size: 16px; outline: none; background: #fff; }
+        .btn-action { background: var(--ios-blue); color: white; border: none; border-radius: 50%; width: 32px; height: 32px; font-weight: bold; }
+        .btn-loc { background: none; color: var(--ios-blue); font-size: 24px; }
+    </style>
+</head>
+<body>
+
+    <div class="header" id="app-title">Mensajes</div>
+    <div id="chat-box"></div>
+
+    <div id="map-overlay">
+        <div class="map-nav">
+            <span id="map-target-name" style="font-weight: bold;">Ubicación</span>
+            <button onclick="closeMap()" style="background:none; border:none; color:var(--ios-blue); font-size:17px; font-weight:600;">Listo</button>
+        </div>
+        <div id="full-map"></div>
+    </div>
+
+    <div class="input-area">
+        <button class="btn-loc" id="btnCompartir">⊕</button>
+        <input type="text" id="mensajeTxt" placeholder="iMessage" autocomplete="off">
+        <button class="btn-action" id="btnEnviar">↑</button>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getDatabase, ref, push, onChildAdded, set, onValue, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyA0fSr6nphRd40eVBwhAyrbSj50y7KBkKE",
+            authDomain: "msjs-4e2a7.firebaseapp.com",
+            databaseURL: "https://msjs-4e2a7-default-rtdb.firebaseio.com",
+            projectId: "msjs-4e2a7",
+            storageBucket: "msjs-4e2a7.firebasestorage.app",
+            messagingSenderId: "1024639339376",
+            appId: "1:1024639339376:web:ccc996f317e7fb55f91db5"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const chatRef = ref(db, "mensajes");
+
+        let miNombre = localStorage.getItem("nombreUsuario") || prompt("¿Cómo te llamas?") || "Usuario";
+        localStorage.setItem("nombreUsuario", miNombre);
+        document.getElementById("app-title").textContent = miNombre;
+
+        const input = document.getElementById('mensajeTxt');
+        const box = document.getElementById('chat-box');
+
+        // --- MAPA LEAFLET CORREGIDO ---
+        let leafletMap = L.map('full-map').setView([9.9281, -84.0907], 15); // Costa Rica por defecto
+        
+        // El servidor de calles (tiles) correcto
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(leafletMap);
+
+        let currentMarker = L.marker([0,0]).addTo(leafletMap);
+
+        window.openMap = (nombre) => {
+            document.getElementById('map-overlay').style.display = 'flex';
+            document.getElementById('map-target-name').textContent = "Ubicación de " + nombre;
+            
+            // Forzar a Leaflet a recalcular el tamaño cuando se abre el overlay
+            setTimeout(() => { leafletMap.invalidateSize(); }, 200);
+
+            onValue(ref(db, 'rastreo/' + nombre), (snapshot) => {
+                const pos = snapshot.val();
+                if (pos) {
+                    const coords = [pos.lat, pos.lng];
+                    currentMarker.setLatLng(coords);
+                    leafletMap.setView(coords, 16);
+                }
+            });
+        };
+
+        window.closeMap = () => {
+            document.getElementById('map-overlay').style.display = 'none';
+        };
+
+        // --- COMPARTIR UBICACIÓN ---
+        document.getElementById('btnCompartir').onclick = () => {
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition((pos) => {
+                    set(ref(db, 'rastreo/' + miNombre), {
+                        lat: pos.coords.latitude,
+                        lng: pos.coords.longitude,
+                        ultimaVez: serverTimestamp()
+                    });
+                }, null, { enableHighAccuracy: true });
+
+                push(chatRef, {
+                    nombre: miNombre,
+                    tipo: 'ubicacion',
+                    texto: "📍 Ubicación en vivo",
+                    fecha: serverTimestamp()
+                });
+            }
+        };
+
+        const enviarMensaje = () => {
+            const txt = input.value.trim();
+            if(txt !== "") {
+                push(chatRef, { nombre: miNombre, texto: txt, tipo: 'texto', fecha: serverTimestamp() });
+                input.value = "";
+            }
+        };
+        document.getElementById('btnEnviar').onclick = enviarMensaje;
+
+        onChildAdded(chatRef, (snapshot) => {
+            const data = snapshot.val();
+            const esMio = (data.nombre === miNombre);
+            const div = document.createElement("div");
+            div.className = esMio ? "msg sent" : "msg received";
+            
+            if (data.tipo === 'ubicacion') {
+                div.classList.add('location-msg');
+                div.onclick = () => openMap(data.nombre);
+                div.innerHTML = `<span class="msg-info">${esMio ? 'Tú' : data.nombre}</span>📍 Ver ubicación en vivo`;
+            } else {
+                div.innerHTML = `<span class="msg-info">${esMio ? '' : data.nombre}</span>${data.texto}`;
+            }
+            
+            box.appendChild(div);
+            box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+        });
+    </script>
+</body>
+</html>
